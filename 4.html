@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>V-Manager Pro | Ultimate Offline</title>
+    <title>V-Manager Pro | Local Edition</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
         :root { --apple-bg: #1e1e1e; --apple-sidebar: rgba(40, 40, 40, 0.8); --apple-active: #007AFF; }
         body { background-color: #000; color: #ffffff; font-family: 'Inter', -apple-system, sans-serif; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
-        .glass-sidebar { background: var(--apple-sidebar); backdrop-filter: blur(50px); -webkit-backdrop-filter: blur(50px); border-right: 1px solid rgba(255, 255, 255, 0.05); }
+        .glass-sidebar { background: var(--apple-sidebar); backdrop-filter: blur(50px); border-right: 1px solid rgba(255, 255, 255, 0.05); }
         .main-stage { background: #121212; position: relative; }
         .window-control { width: 12px; height: 12px; border-radius: 50%; }
         .red { background: #FF5F57; } .yellow { background: #FEBC2E; } .green { background: #28C840; }
@@ -20,70 +20,75 @@
         .toolbar-btn:disabled { opacity: 0.2; cursor: not-allowed; }
         .led { width: 8px; height: 8px; border-radius: 50%; background: #333; transition: 0.1s; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
-        .sandbox-warning { animation: pulse 2s infinite; }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .warning-banner { animation: slideDown 0.5s ease-out; }
+        @keyframes slideDown { from { transform: translateY(-100%); } to { transform: translateY(0); } }
     </style>
 </head>
 <body class="flex flex-col">
 
-    <!-- 標題列 -->
+    <!-- 如果偵測到在預覽沙箱，顯示警告 -->
+    <div id="sandbox-warning" class="hidden warning-banner bg-amber-500 text-black text-[11px] font-bold py-1 px-4 flex justify-between items-center z-50">
+        <span>⚠️ 您目前正在「預覽模式」執行。為了啟動虛擬機，請下載此 HTML 並在本地瀏覽器開啟。</span>
+        <button onclick="this.parentElement.remove()" class="opacity-50">✕</button>
+    </div>
+
     <header class="h-10 flex items-center px-4 bg-[#2d2d2d] border-b border-black select-none">
         <div class="flex gap-2">
             <div class="window-control red"></div>
             <div class="window-control yellow"></div>
             <div class="window-control green"></div>
         </div>
-        <div class="flex-1 text-center text-[11px] font-medium text-white/50">V-Manager Pro — 專業虛擬化控制台 (終極修復版)</div>
+        <div class="flex-1 text-center text-[11px] font-medium text-white/50">V-Manager Pro — 虛擬機控制中心 (本地運行版)</div>
     </header>
 
-    <!-- 工具列 -->
-    <div class="h-16 flex items-center px-6 bg-[#252525] border-b border-black/40 gap-2 select-none">
+    <div class="h-16 flex items-center px-6 bg-[#252525] border-b border-black/40 gap-2">
         <button id="btn-boot" class="toolbar-btn" disabled>
             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="20"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
             <span>啟動</span>
         </button>
         <button id="btn-reset" class="toolbar-btn"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="20"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg><span>重啟</span></button>
-        <div class="h-8 w-px bg-white/10 mx-2"></div>
         <div class="ml-auto flex items-center gap-4 bg-black/20 px-4 py-2 rounded-lg border border-white/5">
             <div class="flex items-center gap-2"><span class="text-[9px] text-white/30 uppercase font-bold">CPU</span><div id="led-cpu" class="led"></div></div>
-            <div id="status-text" class="text-[10px] font-mono text-blue-400">WAITING</div>
+            <div id="status-text" class="text-[10px] font-mono text-blue-400">READY</div>
         </div>
     </div>
 
     <div class="flex-1 flex overflow-hidden">
         <aside class="w-64 glass-sidebar flex flex-col p-4 select-none">
-            <div class="text-[10px] font-bold text-white/20 uppercase tracking-widest mb-4 px-2">本地管理</div>
-            <div class="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 mb-4">
-                <div class="text-[11px] font-bold text-blue-400 mb-1">提示</div>
-                <div class="text-[10px] text-blue-300/70 leading-relaxed">如果啟動失敗，請下載此檔案並直接在電腦上開啟，以避開預覽沙箱限制。</div>
-            </div>
-
-            <div class="mt-auto pt-4 border-t border-white/5 space-y-4">
-                <div class="bg-black/20 p-4 rounded-xl">
-                    <label class="text-[9px] text-white/30 uppercase font-bold block mb-2">配置記憶體</label>
+            <div class="text-[10px] font-bold text-white/20 uppercase tracking-widest mb-4 px-2">硬體配置</div>
+            
+            <div class="space-y-4">
+                <div class="bg-black/20 p-4 rounded-xl border border-white/5">
+                    <label class="text-[9px] text-white/30 uppercase font-bold block mb-2">記憶體 (RAM)</label>
                     <select id="mem-val" class="w-full bg-zinc-800 text-xs p-2 rounded border border-white/5 outline-none">
                         <option value="512">512 MB</option>
                         <option value="1024" selected>1024 MB</option>
+                        <option value="2048">2048 MB</option>
                     </select>
                 </div>
-                <button id="load-local" class="w-full bg-blue-600 hover:bg-blue-500 py-3 rounded-xl text-xs font-bold transition shadow-lg">載入系統鏡像</button>
+
+                <div class="bg-blue-600/10 p-4 rounded-xl border border-blue-500/20">
+                    <div class="text-[10px] text-blue-400 font-bold mb-1">提示</div>
+                    <p class="text-[9px] text-blue-300/60 leading-relaxed">下載此檔案至本地後，即使在沒有網路的情況下也能執行已緩存的系統。</p>
+                </div>
+                
+                <button id="load-local" class="w-full bg-blue-600 hover:bg-blue-500 py-3 rounded-xl text-xs font-bold transition shadow-lg shadow-blue-500/20">選擇本地 ISO/IMG</button>
                 <input type="file" id="file-input" class="hidden" accept=".iso,.img">
-                <div id="file-info" class="text-[10px] text-emerald-400 text-center truncate hidden"></div>
+                <div id="file-info" class="text-[10px] text-emerald-400 text-center truncate hidden mt-2"></div>
             </div>
         </aside>
 
         <main class="flex-1 main-stage flex flex-col items-center justify-center p-6">
             <div id="screen_container" class="relative">
-                <div id="welcome-overlay" class="absolute inset-0 flex flex-col items-center justify-center bg-[#121212] z-10">
-                    <div id="sandbox-alert" class="hidden mb-6 px-4 py-2 bg-red-500/20 border border-red-500/50 rounded-full text-red-400 text-[11px] sandbox-warning">
-                        ⚠️ 偵測到預覽沙箱：請下載檔案到本地執行
-                    </div>
-                    <h2 id="welcome-msg" class="text-lg font-light text-white/30">正在準備環境...</h2>
+                <!-- 啟動前的歡迎畫面 -->
+                <div id="welcome-overlay" class="absolute inset-0 flex flex-col items-center justify-center bg-[#121212] z-10 transition-opacity">
+                    <h2 class="text-lg font-light text-white/40 mb-2">等待引導媒體...</h2>
+                    <p class="text-[9px] text-white/20 uppercase tracking-widest">請先點擊左側「選擇本地 ISO/IMG」</p>
                 </div>
             </div>
 
             <div id="log-box" class="absolute bottom-6 left-6 right-6 h-32 bg-black/80 backdrop-blur-md rounded-xl border border-white/5 p-4 overflow-y-auto no-scrollbar">
-                <div id="log-container" class="space-y-1 font-mono"></div>
+                <div id="log-container" class="space-y-1 font-mono text-[9px]"></div>
             </div>
         </main>
     </div>
@@ -96,35 +101,35 @@
         function log(msg, type = 'info') {
             const container = document.getElementById('log-container');
             const div = document.createElement('div');
-            div.className = 'text-[9px] leading-tight';
             div.style.color = type === 'error' ? '#ff5f57' : (type === 'success' ? '#30d158' : 'rgba(255,255,255,0.4)');
             div.innerHTML = `<span>[${new Date().toLocaleTimeString([], {hour12:false})}]</span> ${msg}`;
             container.appendChild(div);
             container.scrollTop = container.scrollHeight;
         }
 
-        // 初始化檢查
+        // 核心載入與沙箱檢查
         (function init() {
-            log("正在初始化虛擬化引擎...");
+            log("正在檢查虛擬化核心...");
             const s = document.createElement('script');
             s.src = "https://cdn.jsdelivr.net/npm/v86@latest/build/libv86.js";
             s.onload = () => {
                 if (typeof V86Starter !== "undefined") {
-                    log("核心載入成功！", "success");
-                    document.getElementById('welcome-msg').textContent = "請載入 ISO/IMG 鏡像";
+                    log("核心載入成功！環境驗證通過。", "success");
                 } else {
-                    handleSandboxError();
+                    document.getElementById('sandbox-warning').classList.remove('hidden');
+                    log("警告：偵測到沙箱環境，功能可能受限。", "error");
                 }
             };
-            s.onerror = handleSandboxError;
+            s.onerror = () => {
+                log("無法連接到引擎伺服器，請確認網路連線。", "error");
+            };
             document.head.appendChild(s);
-        })();
 
-        function handleSandboxError() {
-            log("環境受限：V86 類別未定義 (可能受預覽沙箱影響)", "error");
-            document.getElementById('sandbox-alert').classList.remove('hidden');
-            document.getElementById('welcome-msg').textContent = "請下載此 HTML 到本地執行";
-        }
+            // 檢查是否在 iframe 中 (預覽環境)
+            if (window.self !== window.top) {
+                document.getElementById('sandbox-warning').classList.remove('hidden');
+            }
+        })();
 
         document.getElementById('load-local').onclick = () => document.getElementById('file-input').click();
         
@@ -132,7 +137,7 @@
             const file = e.target.files[0];
             if (!file) return;
             fileName = file.name.toLowerCase();
-            log(`已讀取: ${file.name}`);
+            log(`已掛載鏡像: ${file.name}`);
             
             const reader = new FileReader();
             reader.onload = (ev) => {
@@ -140,14 +145,14 @@
                 document.getElementById('btn-boot').disabled = false;
                 document.getElementById('file-info').textContent = `已載入: ${file.name}`;
                 document.getElementById('file-info').classList.remove('hidden');
-                log("數據就緒，可點擊啟動。", "success");
+                log("數據載入記憶體完成，可以啟動。", "success");
             };
             reader.readAsArrayBuffer(file);
         };
 
         document.getElementById('btn-boot').onclick = function() {
             if (typeof V86Starter === "undefined") {
-                log("啟動失敗：類別遺失。請下載檔案後本地重試。", "error");
+                log("核心未定義。請下載此檔案後在本地開啟。", "error");
                 return;
             }
 
@@ -165,16 +170,29 @@
 
             if (fileName.endsWith('.iso')) {
                 config.cdrom = { buffer: userDataBuffer };
+                log("引導模式: CD-ROM");
             } else {
                 config.hda = { buffer: userDataBuffer };
+                log("引導模式: 硬碟鏡像");
             }
 
             try {
                 emulator = new V86Starter(config);
-                log("正在模擬處理器...", "success");
+                log("虛擬處理器啟動成功。", "success");
                 document.getElementById('status-text').textContent = "RUNNING";
+                
+                const cLed = document.getElementById('led-cpu');
+                setInterval(() => {
+                    if(emulator.is_running()) {
+                        cLed.style.background = '#30D158';
+                        setTimeout(() => cLed.style.background = '#333', 100);
+                    }
+                }, 500);
             } catch (err) {
                 log("初始化崩潰: " + err.message, "error");
+                if (err.message.includes('memory')) {
+                    log("提示: 請嘗試下載檔案到本地執行，沙箱記憶體不足。", "error");
+                }
             }
         };
 
