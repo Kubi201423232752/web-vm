@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>V86 在線虛擬機管理器 - 最終修復版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #0f172a; color: #f1f5f9; overflow: hidden; font-family: system-ui, -apple-system, sans-serif; }
+        #screen_container {
+            background-color: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: calc(100vh - 4rem);
+            position: relative;
+        }
+        #screen canvas { display: block; margin: auto; image-rendering: pixelated; max-width: 100%; max-height: 100%; }
+        .sidebar { background: #1e293b; border-right: 1px solid #334155; z-index: 20; }
+        kbd { background: #475569; padding: 2px 4px; border-radius: 4px; font-family: monospace; font-size: 0.75rem; }
+        .log-error { color: #fb7185; font-weight: bold; background: rgba(251, 113, 133, 0.1); padding: 2px 4px; border-radius: 2px; }
+        .log-success { color: #34d399; }
+        .log-warn { color: #fbbf24; }
+        .loader { border-top-color: #38bdf8; animation: spinner 0.6s linear infinite; }
+        @keyframes spinner { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="flex h-screen">
+
+    <!-- 左側控制面板 -->
+    <aside class="sidebar w-80 p-6 flex flex-col gap-5 overflow-y-auto shadow-2xl">
+        <div class="mb-2">
+            <h1 class="text-xl font-bold text-sky-400">V86 Emulator</h1>
+            <p class="text-[10px] text-slate-400 uppercase tracking-widest mt-1">基於 WebAssembly 的虛擬化方案</p>
+        </div>
+
+        <!-- 狀態提醒 -->
+        <div id="lib_status" class="p-3 bg-slate-800 rounded-lg border border-slate-700 text-[11px] flex items-center gap-3">
+            <div id="lib_led" class="w-2 h-2 rounded-full bg-yellow-500 animate-pulse"></div>
+            <span id="lib_text" class="text-slate-300">正在嘗試載入核心組件...</span>
+        </div>
+
+        <section class="space-y-4">
+            <div class="space-y-2">
+                <label class="block text-xs font-semibold text-slate-300">1. 選擇預設系統</label>
+                <select id="os_select" class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-sm focus:ring-2 focus:ring-sky-500 outline-none text-white transition-all">
+                    <option value="none">-- 請選擇系統 --</option>
+                    <option value="kolibrios">KolibriOS (圖形界面 - 最推薦)</option>
+                    <option value="win95">Windows 95 (圖形界面 - 較重)</option>
+                    <option value="freedos">FreeDOS (命令行模式)</option>
+                    <option value="linux">Linux 2.6 (小型內核)</option>
+                </select>
+            </div>
+
+            <div class="space-y-2">
+                <label class="block text-xs font-semibold text-slate-300">2. 手動載入本地鏡像 (最穩定)</label>
+                <input type="file" id="local_file" class="block w-full text-xs text-slate-400 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-slate-700 file:text-white hover:file:bg-slate-600 cursor-pointer border border-dashed border-slate-600 p-1 rounded-lg">
+            </div>
+        </section>
+
+        <div class="space-y-2 pt-2">
+            <button id="start_btn" disabled class="w-full bg-sky-600 hover:bg-sky-500 disabled:opacity-50 disabled:cursor-not-allowed text-white py-2.5 rounded-lg font-bold transition-all shadow-lg active:scale-95">啟動虛擬機</button>
+            <button id="stop_btn" class="w-full bg-rose-600 hover:bg-rose-500 text-white py-2.5 rounded-lg font-bold hidden transition-all shadow-lg">強制停止</button>
+        </div>
+
+        <section class="mt-auto pt-4 border-t border-slate-800">
+            <div class="flex justify-between items-center mb-2">
+                <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">運行日誌</h3>
+                <button onclick="document.getElementById('log_output').innerHTML=''" class="text-[10px] text-sky-500 hover:text-sky-400">清除</button>
+            </div>
+            <div id="log_output" class="bg-black/40 text-[10px] p-2.5 h-44 overflow-y-auto rounded-lg font-mono text-slate-300 border border-slate-800 leading-relaxed shadow-inner">
+                <div>系統就緒，等待組件加載...</div>
+            </div>
+        </section>
+    </aside>
+
+    <!-- 主顯示區域 -->
+    <main class="flex-1 flex flex-col">
+        <header class="h-16 flex items-center px-6 bg-slate-900/50 border-b border-slate-800 justify-between backdrop-blur-sm">
+            <div class="flex items-center gap-4">
+                <div class="flex items-center gap-2">
+                    <div id="led" class="w-2.5 h-2.5 rounded-full bg-slate-700"></div>
+                    <span id="status_text" class="text-[10px] font-bold text-slate-500 uppercase">Power Off</span>
+                </div>
+            </div>
+            <div class="text-[11px] text-slate-500 flex items-center gap-4">
+                <span>按 <kbd>ESC</kbd> 釋放滑鼠</span>
+            </div>
+        </header>
+
+        <div id="screen_container">
+            <div id="screen"></div>
+            
+            <div id="loading_overlay" class="absolute inset-0 bg-slate-950/90 flex items-center justify-center z-50 hidden">
+                <div class="text-center p-6 bg-slate-900 rounded-2xl border border-slate-700 shadow-2xl max-w-xs w-full">
+                    <div class="w-10 h-10 border-4 border-slate-700 border-t-sky-500 rounded-full animate-spin mx-auto mb-4"></div>
+                    <p id="loading_title" class="text-sky-400 font-bold">虛擬機啟動中</p>
+                    <p id="progress_text" class="text-[11px] text-slate-500 mt-2">正在處理系統鏡像...</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const logBox = document.getElementById("log_output");
+        const statusText = document.getElementById("status_text");
+        const led = document.getElementById("led");
+        const loading = document.getElementById("loading_overlay");
+        const progressText = document.getElementById("progress_text");
+        const startBtn = document.getElementById("start_btn");
+        const libLed = document.getElementById("lib_led");
+        const libText = document.getElementById("lib_text");
+
+        function addLog(msg, type = "") {
+            const div = document.createElement("div");
+            if (type === "error") div.className = "log-error";
+            if (type === "success") div.className = "log-success";
+            if (type === "warn") div.className = "log-warn";
+            div.innerText = `[${new Date().toLocaleTimeString([], {hour12:false})}] ${msg}`;
+            logBox.appendChild(div);
+            logBox.scrollTop = logBox.scrollHeight;
+        }
+
+        // 多源加載器：確保 V86 核心能被載入
+        function initV86() {
+            const cdnList = [
+                "https://unpkg.com/v86@0.10.2/build/libv86.js",
+                "https://cdn.jsdelivr.net/npm/v86@0.10.2/build/libv86.js",
+                "https://copy.sh/v86/build/libv86.js"
+            ];
+            
+            let currentIdx = 0;
+
+            function loadScript() {
+                if (currentIdx >= cdnList.length) {
+                    addLog("嚴重錯誤：無法載入核心組件。環境限制過嚴。", "error");
+                    libLed.className = "w-2 h-2 rounded-full bg-red-500";
+                    libText.innerText = "核心載入失敗 (環境受限)";
+                    return;
+                }
+
+                addLog(`正在嘗試從來源 ${currentIdx + 1} 載入組件...`);
+                const script = document.createElement("script");
+                script.src = cdnList[currentIdx];
+                script.onload = () => {
+                    addLog("核心組件載入成功！", "success");
+                    libLed.className = "w-2 h-2 rounded-full bg-green-500";
+                    libText.innerText = "核心已就緒";
+                    startBtn.disabled = false;
+                };
+                script.onerror = () => {
+                    addLog(`來源 ${currentIdx + 1} 被攔截。`, "warn");
+                    currentIdx++;
+                    loadScript();
+                };
+                document.head.appendChild(script);
+            }
+
+            loadScript();
+        }
+
+        initV86();
+
+        let emulator = null;
+
+        async function startVM(config) {
+            if (typeof V86Starter === "undefined") {
+                addLog("無法啟動：V86 尚未加載完畢。", "error");
+                return;
+            }
+
+            loading.classList.remove("hidden");
+            statusText.innerText = "Initializing...";
+            
+            const settings = {
+                wasm_path: "https://unpkg.com/v86@0.10.2/build/v86.wasm",
+                bios: { url: "https://unpkg.com/v86@0.10.2/bios/seabios.bin" },
+                vga_bios: { url: "https://unpkg.com/v86@0.10.2/bios/vgabios.bin" },
+                screen_container: document.getElementById("screen"),
+                autostart: true,
+                ...config
+            };
+
+            try {
+                emulator = new V86Starter(settings);
+
+                emulator.add_listener("emulator-ready", () => {
+                    addLog("虛擬機運行中。", "success");
+                    loading.classList.add("hidden");
+                    statusText.innerText = "Running";
+                    led.className = "w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981]";
+                    startBtn.classList.add("hidden");
+                    document.getElementById("stop_btn").classList.remove("hidden");
+                });
+
+                emulator.add_listener("download-progress", (e) => {
+                    if (e.total) {
+                        const p = Math.round((e.loaded / e.total) * 100);
+                        progressText.innerText = `下載進度: ${p}%`;
+                    }
+                });
+
+                emulator.add_listener("download-error", () => {
+                    addLog("資源下載被攔截！建議上傳本地鏡像。", "error");
+                    loading.classList.add("hidden");
+                });
+
+            } catch (err) {
+                addLog(`錯誤: ${err.message}`, "error");
+                loading.classList.add("hidden");
+            }
+        }
+
+        const PRESETS = {
+            win95: { hda: { url: "https://copy.sh/v86/images/windows95.img" }, memory_size: 128*1024*1024 },
+            kolibrios: { fda: { url: "https://copy.sh/v86/images/kolibri.img" }, memory_size: 64*1024*1024 },
+            freedos: { fda: { url: "https://copy.sh/v86/images/freedos722.img" }, memory_size: 32*1024*1024 },
+            linux: { cdrom: { url: "https://copy.sh/v86/images/linux3.iso" }, memory_size: 96*1024*1024 }
+        };
+
+        startBtn.addEventListener("click", () => {
+            const os = document.getElementById("os_select").value;
+            const files = document.getElementById("local_file").files;
+
+            if (files.length > 0) {
+                const reader = new FileReader();
+                reader.onload = (e) => startVM({ hda: { buffer: e.target.result }, memory_size: 128*1024*1024 });
+                reader.readAsArrayBuffer(files[0]);
+            } else if (PRESETS[os]) {
+                startVM(PRESETS[os]);
+            } else {
+                alert("請選擇系統或載入檔案。");
+            }
+        });
+
+        document.getElementById("stop_btn").addEventListener("click", () => {
+            if (emulator) {
+                emulator.stop();
+                location.reload(); // 徹底重置
+            }
+        });
+    </script>
+</body>
+</html>
